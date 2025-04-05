@@ -302,7 +302,7 @@ export async function inchSwapHandler(
     // Step 1: Get swap data from 1inch API
     const headers = {
       accept: "application/json",
-      "api-key": actualApiKey
+      Authorization: `Bearer ${actualApiKey}`
     };
 
     const swapUrl = `https://api.1inch.dev/swap/v6.0/${chainId}/swap`;
@@ -317,7 +317,7 @@ export async function inchSwapHandler(
 
     // u6253u5370u8bf7u6c42u4fe1u606fuff08u4e0du5305u542bu5b8cu6574u7684APIu5bc6u94a5uff09
     console.log(`1inch API Request to: ${swapUrl}`);
-    console.log(`Headers: { accept: "application/json", api-key: "${actualApiKey.substring(0, 3)}..." }`);
+    console.log(`Headers: { accept: "application/json", Authorization: "Bearer ${actualApiKey.substring(0, 3)}..." }`);
     console.log(`Params:`, swapParams);
 
     try {
@@ -329,12 +329,104 @@ export async function inchSwapHandler(
       const swapData = response.data;
 
       // Step 2: Execute the transaction
+      const txData = swapData.tx;
+      console.log('1inch交易数据:', JSON.stringify(txData, null, 2));
+
+      // 检查钱包余额
+      const balance = await wallet.getBalance({ address: actualFromAddress });
+      console.log(`钱包余额: ${balance} wei`);
+      
+      // 如果是ERC20代币，可能需要检查授权
+      if (fromTokenAddress !== '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE') {
+        console.log('检查ERC20代币授权...');
+        
+        // ERC20 ABI的授权函数
+        const erc20Abi = [
+          {
+            "constant": false,
+            "inputs": [
+              { "name": "spender", "type": "address" },
+              { "name": "amount", "type": "uint256" }
+            ],
+            "name": "approve",
+            "outputs": [{ "name": "", "type": "bool" }],
+            "payable": false,
+            "stateMutability": "nonpayable",
+            "type": "function"
+          },
+          {
+            "constant": true,
+            "inputs": [
+              { "name": "owner", "type": "address" },
+              { "name": "spender", "type": "address" }
+            ],
+            "name": "allowance",
+            "outputs": [{ "name": "", "type": "uint256" }],
+            "payable": false,
+            "stateMutability": "view",
+            "type": "function"
+          }
+        ];
+
+        // 检查当前授权额度
+        const allowance = await wallet.readContract({
+          address: fromTokenAddress as `0x${string}`,
+          abi: erc20Abi,
+          functionName: 'allowance',
+          args: [actualFromAddress, txData.to],
+        }) as bigint;
+
+        console.log(`当前授权额度: ${allowance} wei`);
+
+        // 如果授权额度不足，需要授权
+        if (allowance < BigInt(amount)) {
+          console.log('授权ERC20代币...');
+          
+          // 授权一个非常大的数值
+          const maxApproval = BigInt('115792089237316195423570985008687907853269984665640564039457584007913129639935'); // 2^256 - 1
+          
+          const approveTx = await wallet.writeContract({
+            address: fromTokenAddress as `0x${string}`,
+            abi: erc20Abi,
+            functionName: 'approve',
+            args: [txData.to, maxApproval],
+            account: wallet.account,
+            chain: wallet.chain
+          });
+          
+          console.log(`授权交易哈希: ${approveTx}`);
+          
+          // 等待授权交易确认
+          console.log('等待授权交易确认...');
+          const approveReceipt = await wallet.waitForTransactionReceipt({ hash: approveTx });
+          console.log(`授权交易状态: ${approveReceipt.status === 'success' ? '成功' : '失败'}`);
+          
+          if (approveReceipt.status !== 'success') {
+            throw new Error('授权交易失败');
+          }
+        }
+      }
+
+      // 确保设置gas参数
+      if (!txData.gas) {
+        // 估算gas用量
+        const gasEstimate = await wallet.estimateGas({
+          account: wallet.account,
+          to: txData.to as `0x${string}`,
+          data: txData.data as `0x${string}`,
+          value: BigInt(txData.value || '0'),
+        });
+
+        // 添加20%的缓冲区
+        txData.gas = (gasEstimate * 120n / 100n).toString();
+      }
+
       const tx = {
         from: actualFromAddress,
-        to: swapData.tx.to as `0x${string}`,
-        data: swapData.tx.data as `0x${string}`,
-        value: BigInt(swapData.tx.value || 0),
-        gas: BigInt(swapData.tx.gas || 0),
+        to: txData.to as `0x${string}`,
+        data: txData.data as `0x${string}`,
+        value: BigInt(txData.value || 0),
+        gas: BigInt(txData.gas),
       };
 
       // Send the transaction
