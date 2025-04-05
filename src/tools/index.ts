@@ -8,6 +8,7 @@ import {
   deployPropertyNFTHandler,
   deployPropertyTokenHandler,
   deployPropertyYieldVaultHandler,
+  inchSwapHandler,
 } from "./handlers.js";
 
 const callContractTool: Tool = {
@@ -169,6 +170,46 @@ const deployPropertyYieldVaultTool: Tool = {
   },
 };
 
+// 1inch Swap Tool
+const inchSwapTool: Tool = {
+  name: "inch_swap",
+  description: "Swap tokens using 1inch Exchange on Polygon",
+  inputSchema: {
+    type: "object",
+    properties: {
+      fromTokenAddress: {
+        type: "string",
+        description: "The address of the token to swap from",
+      },
+      toTokenAddress: {
+        type: "string",
+        description: "The address of the token to swap to",
+      },
+      amount: {
+        type: "string",
+        description: "The amount of tokens to swap in wei",
+      },
+      fromAddress: {
+        type: "string",
+        description: "The address to swap from (defaults to current wallet address)",
+      },
+      slippage: {
+        type: "number",
+        description: "The maximum acceptable slippage percentage (default: 1)",
+      },
+      apiKey: {
+        type: "string",
+        description: "Your 1inch API key",
+      },
+      chainId: {
+        type: "number",
+        description: "The chain ID (default: 137 for Polygon)",
+      },
+    },
+    required: ["fromTokenAddress", "toTokenAddress", "amount"],
+  },
+};
+
 export const polygonMcpTools: Tool[] = [
   callContractTool,
   erc20BalanceTool,
@@ -178,6 +219,7 @@ export const polygonMcpTools: Tool[] = [
   deployPropertyNFTTool,
   deployPropertyTokenTool,
   deployPropertyYieldVaultTool,
+  inchSwapTool,
 ];
 
 // biome-ignore lint/complexity/noBannedTypes: temp
@@ -190,4 +232,5 @@ export const toolToHandler: Record<string, Function> = {
   deploy_property_nft: deployPropertyNFTHandler,
   deploy_property_token: deployPropertyTokenHandler,
   deploy_property_yield_vault: deployPropertyYieldVaultHandler,
+  inch_swap: inchSwapHandler,
 };

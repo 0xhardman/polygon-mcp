@@ -18,12 +18,14 @@ import type {
   DeployPropertyYieldVaultSchema,
   Erc20BalanceSchema,
   Erc20TransferSchema,
+  InchSwapSchema,
 } from "./schemas.js";
 import { constructPolygonScanUrl } from "../utils/index.js";
 import { polygon } from "viem/chains";
 import { PropertyNFT } from "../contracts/PropertyNFT.js";
 import { PropertyToken } from "../contracts/PropertyToken.js";
 import { PropertyYieldVault } from "../contracts/PropertyYieldVault.js";
+import axios from "axios";
 
 export async function deployPropertyNFTHandler(
   wallet: WalletClient & PublicActions,
@@ -252,4 +254,131 @@ export async function getGasPriceHandler(
 ): Promise<string> {
   const gasPrice = await wallet.getGasPrice();
   return formatUnits(gasPrice, 9) + " Gwei";
+}
+
+// 1inch Swap Handler
+export async function inchSwapHandler(
+  wallet: WalletClient & PublicActions,
+  args: z.infer<typeof InchSwapSchema>
+): Promise<string> {
+  if (!wallet.account?.address) {
+    throw new Error("No account address available");
+  }
+
+  const {
+    fromTokenAddress,
+    toTokenAddress,
+    amount,
+    fromAddress,
+    slippage = 1,
+    apiKey,
+    chainId = 137, // Default to Polygon
+  } = args;
+
+  // 使用当前钱包地址作为默认fromAddress
+  const actualFromAddress = fromAddress || wallet.account.address;
+
+  // Validate addresses
+  if (!isAddress(fromTokenAddress)) {
+    throw new Error(`Invalid fromTokenAddress: ${fromTokenAddress}`);
+  }
+  if (!isAddress(toTokenAddress)) {
+    throw new Error(`Invalid toTokenAddress: ${toTokenAddress}`);
+  }
+  if (!isAddress(actualFromAddress)) {
+    throw new Error(`Invalid fromAddress: ${actualFromAddress}`);
+  }
+
+  // 从参数或viemClient中获取API密钥
+  const extendedWallet = wallet as any;
+  const actualApiKey = apiKey || extendedWallet.oneInchApiKey;
+  
+  // Check if API key is provided
+  if (!actualApiKey) {
+    throw new Error("API key is required for 1inch swap");
+  }
+
+  try {
+    // Step 1: Get swap data from 1inch API
+    const headers = {
+      accept: "application/json",
+      "api-key": actualApiKey
+    };
+
+    const swapUrl = `https://api.1inch.dev/swap/v6.0/${chainId}/swap`;
+    const swapParams = {
+      src: fromTokenAddress,
+      dst: toTokenAddress,
+      amount,
+      from: actualFromAddress,
+      slippage: slippage.toString(),
+      disableEstimate: true,
+    };
+
+    // u6253u5370u8bf7u6c42u4fe1u606fuff08u4e0du5305u542bu5b8cu6574u7684APIu5bc6u94a5uff09
+    console.log(`1inch API Request to: ${swapUrl}`);
+    console.log(`Headers: { accept: "application/json", api-key: "${actualApiKey.substring(0, 3)}..." }`);
+    console.log(`Params:`, swapParams);
+
+    try {
+      const response = await axios.get(swapUrl, {
+        headers,
+        params: swapParams,
+      });
+
+      const swapData = response.data;
+
+      // Step 2: Execute the transaction
+      const tx = {
+        from: actualFromAddress,
+        to: swapData.tx.to as `0x${string}`,
+        data: swapData.tx.data as `0x${string}`,
+        value: BigInt(swapData.tx.value || 0),
+        gas: BigInt(swapData.tx.gas || 0),
+      };
+
+      // Send the transaction
+      const hash = await wallet.sendTransaction({
+        account: wallet.account,
+        to: tx.to,
+        data: tx.data,
+        value: tx.value,
+        gas: tx.gas,
+        chain: wallet.chain, // Add chain parameter
+      });
+
+      // Return transaction details and estimated result
+      return JSON.stringify({
+        hash,
+        url: constructPolygonScanUrl(wallet.chain ?? polygon, hash),
+        fromToken: swapData.fromToken,
+        toToken: swapData.toToken,
+        fromAmount: swapData.fromAmount,
+        toAmount: swapData.toAmount,
+        estimatedGas: swapData.tx.gas,
+      });
+    } catch (error: any) {
+      if (error.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        throw new Error(
+          `1inch API error: ${error.response.status} - ${JSON.stringify(
+            error.response.data
+          )}`
+        );
+      } else if (error.request) {
+        // The request was made but no response was received
+        throw new Error(`1inch API request error: ${error.message}`);
+      } else {
+        // Something happened in setting up the request that triggered an Error
+        throw new Error(`1inch swap error: ${error.message}`);
+      }
+    }
+  } catch (error: unknown) {
+    if (typeof error === 'object' && error !== null && 'message' in error) {
+      throw new Error(`1inch swap error: ${(error as Error).message}`);
+    } else {
+      throw new Error(`1inch swap error: ${String(error)}`);
+    }
+  }
 }

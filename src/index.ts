@@ -12,9 +12,20 @@ import { createWalletClient, http, publicActions } from "viem";
 import { polygonMcpTools, toolToHandler } from "./tools/index.js";
 import { POLYGON_RPC_URL } from "./lib/constants.js";
 
+// 扩展viemClient类型，添加oneInchApiKey属性
+type ExtendedViemClient = ReturnType<typeof createWalletClient> & 
+  ReturnType<typeof publicActions> & 
+  { oneInchApiKey?: string };
+
 async function main() {
   dotenv.config();
   const seedPhrase = process.env.SEED_PHRASE;
+  const oneInchApiKey = process.env.ONE_INCH_API_KEY;
+
+  // 打印环境变量，用于调试
+  console.log("Environment variables:");
+  console.log("- SEED_PHRASE:", seedPhrase ? "*****" : "not set");
+  console.log("- ONE_INCH_API_KEY:", oneInchApiKey ? "*****" : "not set");
 
   if (!seedPhrase) {
     console.error(
@@ -23,11 +34,20 @@ async function main() {
     process.exit(1);
   }
 
+  if (!oneInchApiKey) {
+    console.warn(
+      "ONE_INCH_API_KEY environment variable not set. 1inch swap functionality will be limited."
+    );
+  }
+
   const viemClient = createWalletClient({
     account: mnemonicToAccount(seedPhrase),
     chain: polygon,
     transport: http(POLYGON_RPC_URL),
-  }).extend(publicActions);
+  }).extend(publicActions) as ExtendedViemClient;
+
+  // 将环境变量添加到viemClient对象中，以便在处理程序中访问
+  viemClient.oneInchApiKey = oneInchApiKey;
 
   const server = new Server(
     {
@@ -55,7 +75,15 @@ async function main() {
         throw new Error(`Tool ${request.params.name} not found`);
       }
 
-      const result = await tool(viemClient, request.params.arguments);
+      // 确保arguments存在
+      const args = request.params.arguments || {};
+      
+      // 如果是1inch swap工具且没有提供API密钥，则使用环境变量中的API密钥
+      if (request.params.name === "inch_swap" && !args.apiKey && viemClient.oneInchApiKey) {
+        args.apiKey = viemClient.oneInchApiKey;
+      }
+
+      const result = await tool(viemClient, args);
 
       return {
         content: [

@@ -65,3 +65,14 @@ export const DeployPropertyYieldVaultSchema = z.object({
     .string()
     .describe("The ID of the specific property NFT this vault is linked to"),
 });
+
+// 1inch Swap Schema
+export const InchSwapSchema = z.object({
+  fromTokenAddress: z.string().describe("The address of the token to swap from"),
+  toTokenAddress: z.string().describe("The address of the token to swap to"),
+  amount: z.string().describe("The amount of tokens to swap in wei"),
+  fromAddress: z.string().optional().describe("The address to swap from (defaults to current wallet address)"),
+  slippage: z.number().optional().describe("The maximum acceptable slippage percentage (default: 1)"),
+  apiKey: z.string().optional().describe("Your 1inch API key"),
+  chainId: z.number().optional().describe("The chain ID (default: 137 for Polygon)"),
+});
