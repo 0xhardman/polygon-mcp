@@ -11,6 +11,7 @@ import {
   inchSwapHandler,
   checkAllowanceHandler,
   approveTokenHandler,
+  getTokenDecimalsHandler,
 } from "./handlers.js";
 
 const callContractTool: Tool = {
@@ -256,6 +257,21 @@ const approveTokenTool: Tool = {
   },
 };
 
+const getTokenDecimalsTool: Tool = {
+  name: "get_token_decimals",
+  description: "Get the decimals of an ERC20 token on Polygon PoS",
+  inputSchema: {
+    type: "object",
+    properties: {
+      tokenAddress: {
+        type: "string",
+        description: "The address of the token to get decimals for",
+      },
+    },
+    required: ["tokenAddress"],
+  },
+};
+
 export const polygonMcpTools: Tool[] = [
   callContractTool,
   erc20BalanceTool,
@@ -268,6 +284,7 @@ export const polygonMcpTools: Tool[] = [
   inchSwapTool,
   checkAllowanceTool,
   approveTokenTool,
+  getTokenDecimalsTool,
 ];
 
 // biome-ignore lint/complexity/noBannedTypes: temp
@@ -283,4 +300,5 @@ export const toolToHandler: Record<string, Function> = {
   inch_swap: inchSwapHandler,
   check_allowance: checkAllowanceHandler,
   approve_token: approveTokenHandler,
+  get_token_decimals: getTokenDecimalsHandler,
 };

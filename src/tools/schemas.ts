@@ -98,3 +98,11 @@ export const checkAllowanceSchema = z.object({
   tokenAddress: z.string().describe("The address of the token to check allowance for"),
   spenderAddress: z.string().describe("The address of the spender to check allowance for"),
 });
+
+export type GetTokenDecimalsSchema = {
+  tokenAddress: string;
+};
+
+export const GetTokenDecimalsSchema = z.object({
+  tokenAddress: z.string().describe("The address of the token to get decimals for"),
+});

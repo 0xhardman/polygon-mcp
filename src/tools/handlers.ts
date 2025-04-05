@@ -20,7 +20,8 @@ import type {
   Erc20TransferSchema,
   InchSwapSchema,
   checkAllowanceSchema,
-  approveTokenSchema
+  approveTokenSchema,
+  GetTokenDecimalsSchema
 } from "./schemas.js";
 import { constructPolygonScanUrl } from "../utils/index.js";
 import { polygon } from "viem/chains";
@@ -526,5 +527,36 @@ export async function approveTokenHandler(
   } catch (error) {
     console.error('Failed to approve token:', error);
     throw new Error(`Failed to approve token: ${(error as Error).message}`);
+  }
+}
+
+// Get token decimals handler
+export async function getTokenDecimalsHandler(
+  wallet: WalletClient & PublicActions,
+  args: z.infer<typeof GetTokenDecimalsSchema>
+): Promise<string> {
+  if (!wallet.account?.address) {
+    throw new Error("No account address available");
+  }
+
+  const { tokenAddress } = args;
+
+  // Validate addresses
+  if (!isAddress(tokenAddress)) {
+    throw new Error(`Invalid tokenAddress: ${tokenAddress}`);
+  }
+
+  try {
+    // Get decimals for token
+    const decimals = await wallet.readContract({
+      address: tokenAddress as `0x${string}`,
+      abi: erc20Abi,
+      functionName: "decimals",
+    });
+
+    return decimals.toString();
+  } catch (error) {
+    console.error('Failed to get token decimals:', error);
+    throw new Error(`Failed to get token decimals: ${(error as Error).message}`);
   }
 }
