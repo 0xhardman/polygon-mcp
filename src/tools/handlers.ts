@@ -277,7 +277,7 @@ export async function inchSwapHandler(
     chainId = 137, // Default to Polygon
   } = args;
 
-  // 使用当前钱包地址作为默认fromAddress
+  // Use current wallet address as default fromAddress
   const actualFromAddress = fromAddress || wallet.account.address;
 
   // Validate addresses
@@ -291,13 +291,64 @@ export async function inchSwapHandler(
     throw new Error(`Invalid fromAddress: ${actualFromAddress}`);
   }
 
-  // 从参数或viemClient中获取API密钥
+  // Get API key from parameters or viemClient
   const extendedWallet = wallet as any;
   const actualApiKey = apiKey || extendedWallet.oneInchApiKey;
 
   // Check if API key is provided
   if (!actualApiKey) {
     throw new Error("API key is required for 1inch swap");
+  }
+
+  // Check ERC20 balance if not using native token
+  if (fromTokenAddress !== '0xEeeeeEeeeEeEeEeEeEeeEEEeeeeEeeeeeeeEEeE') {
+    try {
+      const erc20Abi = [
+        {
+          "constant": true,
+          "inputs": [{ "name": "_owner", "type": "address" }],
+          "name": "balanceOf",
+          "outputs": [{ "name": "balance", "type": "uint256" }],
+          "payable": false,
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "constant": true,
+          "inputs": [],
+          "name": "decimals",
+          "outputs": [{ "name": "", "type": "uint8" }],
+          "payable": false,
+          "stateMutability": "view",
+          "type": "function"
+        }
+      ];
+
+      // Get token decimals
+      const decimals = await wallet.readContract({
+        address: fromTokenAddress as `0x${string}`,
+        abi: erc20Abi,
+        functionName: 'decimals',
+      }) as number;
+
+      // Get token balance
+      const balance = await wallet.readContract({
+        address: fromTokenAddress as `0x${string}`,
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [actualFromAddress],
+      }) as bigint;
+
+      console.log(`ERC20 balance check: ${balance} (${Number(balance) / Math.pow(10, decimals)} tokens)`);
+
+      // Check if balance is sufficient
+      const amountBigInt = BigInt(amount);
+      if (balance < amountBigInt) {
+        throw new Error(`Insufficient ERC20 balance! Need ${Number(amountBigInt) / Math.pow(10, decimals)} tokens, but only have ${Number(balance) / Math.pow(10, decimals)} tokens`);
+      }
+    } catch (error: any) {
+      throw new Error(`Failed to check ERC20 balance: ${error.message}`);
+    }
   }
 
   try {
@@ -317,7 +368,7 @@ export async function inchSwapHandler(
       disableEstimate: true,
     };
 
-    // u6253u5370u8bf7u6c42u4fe1u606fuff08u4e0du5305u542bu5b8cu6574u7684APIu5bc6u94a5uff09
+    // Print request information (without full API key)
     console.log(`1inch API Request to: ${swapUrl}`);
     console.log(`Headers: { accept: "application/json", Authorization: "Bearer ${actualApiKey.substring(0, 3)}..." }`);
     console.log(`Params:`, swapParams);
@@ -330,19 +381,26 @@ export async function inchSwapHandler(
 
       const swapData = response.data;
 
+      // Print the complete API response for debugging
+      console.log('Complete 1inch API response:', JSON.stringify(swapData, null, 2));
+
       // Step 2: Execute the transaction
       const txData = swapData.tx;
-      console.log('1inch交易数据:', JSON.stringify(txData, null, 2));
+      console.log('1inch transaction data:', JSON.stringify(txData, null, 2));
 
-      // 检查钱包余额
+      if (swapData.protocols) {
+        console.log('- Protocols used:', JSON.stringify(swapData.protocols, null, 2));
+      }
+
+      // Check wallet balance
       const balance = await wallet.getBalance({ address: actualFromAddress });
-      console.log(`钱包余额: ${balance} wei`);
+      console.log(`Wallet balance: ${balance} wei`);
 
-      // 如果是ERC20代币，可能需要检查授权
-      if (fromTokenAddress !== '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE') {
-        console.log('检查ERC20代币授权...');
+      // If it's an ERC20 token, we may need to check authorization
+      if (fromTokenAddress !== '0xEeeeeEeeeEeEeEeEeEeeEEEeeeeEeeeeeeeEEeE') {
+        console.log('Checking ERC20 token approval...');
 
-        // ERC20 ABI的授权函数
+        // ERC20 ABI's approval function
         const erc20Abi = [
           {
             "constant": false,
@@ -370,7 +428,7 @@ export async function inchSwapHandler(
           }
         ];
 
-        // 检查当前授权额度
+        // Check current approval amount
         const allowance = await wallet.readContract({
           address: fromTokenAddress as `0x${string}`,
           abi: erc20Abi,
@@ -378,13 +436,13 @@ export async function inchSwapHandler(
           args: [actualFromAddress, txData.to],
         }) as bigint;
 
-        console.log(`当前授权额度: ${allowance} wei`);
+        console.log(`Current approval amount: ${allowance} wei`);
 
-        // 如果授权额度不足，需要授权
+        // If approval amount is insufficient, we need to approve
         if (allowance < BigInt(amount)) {
-          console.log('授权ERC20代币...');
+          console.log('Approving ERC20 token...');
 
-          // 授权一个非常大的数值
+          // Approve a very large value
           const maxApproval = BigInt('115792089237316195423570985008687907853269984665640564039457584007913129639935'); // 2^256 - 1
 
           const approveTx = await wallet.writeContract({
@@ -396,22 +454,22 @@ export async function inchSwapHandler(
             chain: wallet.chain
           });
 
-          console.log(`授权交易哈希: ${approveTx}`);
+          console.log(`Approval transaction hash: ${approveTx}`);
 
-          // 等待授权交易确认
-          console.log('等待授权交易确认...');
+          // Wait for approval transaction confirmation
+          console.log('Waiting for approval transaction confirmation...');
           const approveReceipt = await wallet.waitForTransactionReceipt({ hash: approveTx });
-          console.log(`授权交易状态: ${approveReceipt.status === 'success' ? '成功' : '失败'}`);
+          console.log(`Approval transaction status: ${approveReceipt.status === 'success' ? 'success' : 'failed'}`);
 
           if (approveReceipt.status !== 'success') {
-            throw new Error('授权交易失败');
+            throw new Error('Approval transaction failed');
           }
         }
       }
 
-      // 确保设置gas参数
+      // Ensure gas parameter is set
       if (!txData.gas) {
-        // 估算gas用量
+        // Estimate gas usage
         const gasEstimate = await wallet.estimateGas({
           account: wallet.account,
           to: txData.to as `0x${string}`,
@@ -419,8 +477,9 @@ export async function inchSwapHandler(
           value: BigInt(txData.value || '0'),
         });
 
-        // 添加20%的缓冲区
+        // Add 20% buffer
         txData.gas = (gasEstimate * 120n / 100n).toString();
+        console.log(`Estimated gas with 20% buffer: ${txData.gas}`);
       }
 
       const tx = {
@@ -432,6 +491,12 @@ export async function inchSwapHandler(
       };
 
       // Send the transaction
+      console.log('Sending transaction with parameters:', {
+        to: tx.to,
+        value: tx.value.toString(),
+        gas: tx.gas.toString(),
+      });
+      
       const hash = await wallet.sendTransaction({
         account: wallet.account,
         to: tx.to,
@@ -497,7 +562,7 @@ export async function checkAllowanceHandler(
   }
 
   try {
-    // 检查当前授权额度
+    // Check current approval amount
     const allowance = await wallet.readContract({
       address: tokenAddress as `0x${string}`,
       abi: erc20Abi,
@@ -507,8 +572,8 @@ export async function checkAllowanceHandler(
 
     return allowance.toString();
   } catch (error) {
-    console.error('检查授权额度失败:', error);
-    throw new Error(`检查授权额度失败: ${(error as Error).message}`);
+    console.error('Failed to check approval amount:', error);
+    throw new Error(`Failed to check approval amount: ${(error as Error).message}`);
   }
 }
 
@@ -532,11 +597,11 @@ export async function approveTokenHandler(
   }
 
   try {
-    // 默认授权最大值
+    // Default to maximum approval
     const maxApproval = BigInt('115792089237316195423570985008687907853269984665640564039457584007913129639935'); // 2^256 - 1
     const approvalAmount = amount ? BigInt(amount) : maxApproval;
 
-    // 执行授权交易
+    // Execute approval transaction
     const hash = await wallet.writeContract({
       address: tokenAddress as `0x${string}`,
       abi: erc20Abi,
@@ -554,7 +619,7 @@ export async function approveTokenHandler(
       amount: approvalAmount.toString(),
     });
   } catch (error) {
-    console.error('授权代币失败:', error);
-    throw new Error(`授权代币失败: ${(error as Error).message}`);
+    console.error('Failed to approve token:', error);
+    throw new Error(`Failed to approve token: ${(error as Error).message}`);
   }
 }
