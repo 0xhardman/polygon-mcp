@@ -406,9 +406,9 @@ export async function inchSwapHandler(
       console.log(`Estimated gas with 20% buffer: ${txData.gas}`);
     } catch (error) {
       // If estimation fails, use a safe default
-      console.error('Gas estimation failed:', error);
+      // console.error('Gas estimation failed:', error);
       txData.gas = '300000'; // Safe default for most swaps
-      console.log(`Using default gas limit: ${txData.gas}`);
+      // console.log(`Using default gas limit: ${txData.gas}`);
     }
   }
 
