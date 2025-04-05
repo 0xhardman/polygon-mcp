@@ -110,11 +110,31 @@ async function main() {
         amount: '1000', // 0.00001 WBTC (8 decimals)
         slippage: 3
       }
+    },
+    //7
+    {
+      name: 'WBTC to USDC',
+      params: {
+        fromTokenAddress: '0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6', // WBTC
+        toTokenAddress: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359',   // MATIC
+        amount: '1000', // 0.00001 WBTC (8 decimals)
+        slippage: 3
+      }
+    },
+    //8
+    {
+      name: 'USDC to WBTC',
+      params: {
+        fromTokenAddress: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', // MATIC
+        toTokenAddress: '0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6',   // WBTC
+        amount: '4000000', // 4 USDC (6 decimals)
+        slippage: 3
+      }
     }
   ];
 
   // Select parameter set to test
-  const testIndex = 6; // Modify this index to test different swap pairs
+  const testIndex = 8; // Modify this index to test different swap pairs
   const swapParams = testParams[testIndex].params;
 
   console.log(`Testing inchSwapHandler function... (${testParams[testIndex].name})`);

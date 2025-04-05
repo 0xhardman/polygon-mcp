@@ -268,14 +268,35 @@ export async function inchSwapHandler(
   }
 
   const {
-    fromTokenAddress,
-    toTokenAddress,
+    fromTokenAddress: originalFromTokenAddress,
+    toTokenAddress: originalToTokenAddress,
     amount,
     fromAddress,
     slippage = 1,
     apiKey,
     chainId = 137, // Default to Polygon
   } = args;
+
+  // Check and replace USDC.e address with native USDC address
+  const USDC_E_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
+  const NATIVE_USDC_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
+
+  // Replace USDC.e with native USDC if detected
+  const fromTokenAddress = originalFromTokenAddress === USDC_E_ADDRESS
+    ? NATIVE_USDC_ADDRESS
+    : originalFromTokenAddress;
+
+  const toTokenAddress = originalToTokenAddress === USDC_E_ADDRESS
+    ? NATIVE_USDC_ADDRESS
+    : originalToTokenAddress;
+
+  // Log if a replacement was made
+  if (originalFromTokenAddress === USDC_E_ADDRESS) {
+    console.log("Automatically replaced USDC.e with native USDC in fromTokenAddress");
+  }
+  if (originalToTokenAddress === USDC_E_ADDRESS) {
+    console.log("Automatically replaced USDC.e with native USDC in toTokenAddress");
+  }
 
   // Use current wallet address as default fromAddress
   const actualFromAddress = fromAddress || wallet.account.address;
@@ -300,246 +321,130 @@ export async function inchSwapHandler(
     throw new Error("API key is required for 1inch swap");
   }
 
-  // Check ERC20 balance if not using native token
+  // Step 1: Get swap data from 1inch API
+  const headers = {
+    accept: "application/json",
+    Authorization: `Bearer ${actualApiKey}`
+  };
+
+  const swapUrl = `https://api.1inch.dev/swap/v6.0/${chainId}/swap`;
+  const swapParams = {
+    src: fromTokenAddress,
+    dst: toTokenAddress,
+    amount,
+    from: actualFromAddress,
+    slippage: slippage.toString(),
+    disableEstimate: true,
+  };
+
+  // Print request information (without full API key)
+  console.log(`1inch API Request to: ${swapUrl}`);
+  console.log(`Headers: { accept: "application/json", Authorization: "Bearer ${actualApiKey.substring(0, 3)}..." }`);
+  console.log(`Params:`, swapParams);
+
+  const response = await axios.get(swapUrl, {
+    headers,
+    params: swapParams,
+  });
+
+  const swapData = response.data;
+
+  // Print the complete API response for debugging
+  console.log('Complete 1inch API response:', JSON.stringify(swapData, null, 2));
+
+  // Step 2: Execute the transaction
+  const txData = swapData.tx;
+  console.log('1inch transaction data:', JSON.stringify(txData, null, 2));
+
+  if (swapData.protocols) {
+    console.log('- Protocols used:', JSON.stringify(swapData.protocols, null, 2));
+  }
+
+  // Check wallet balance
+  const balance = await wallet.getBalance({ address: actualFromAddress });
+  console.log(`Wallet balance: ${balance} wei`);
+
+  // If it's an ERC20 token, check authorization
   if (fromTokenAddress !== '0xEeeeeEeeeEeEeEeEeEeeEEEeeeeEeeeeeeeEEeE') {
-    try {
-      const erc20Abi = [
-        {
-          "constant": true,
-          "inputs": [{ "name": "_owner", "type": "address" }],
-          "name": "balanceOf",
-          "outputs": [{ "name": "balance", "type": "uint256" }],
-          "payable": false,
-          "stateMutability": "view",
-          "type": "function"
-        },
-        {
-          "constant": true,
-          "inputs": [],
-          "name": "decimals",
-          "outputs": [{ "name": "", "type": "uint8" }],
-          "payable": false,
-          "stateMutability": "view",
-          "type": "function"
-        }
-      ];
+    console.log('Checking ERC20 token approval...');
 
-      // Get token decimals
-      const decimals = await wallet.readContract({
-        address: fromTokenAddress as `0x${string}`,
-        abi: erc20Abi,
-        functionName: 'decimals',
-      }) as number;
+    // Check current approval amount
+    const allowance = await wallet.readContract({
+      address: fromTokenAddress as `0x${string}`,
+      abi: erc20Abi,
+      functionName: 'allowance',
+      args: [actualFromAddress, txData.to],
+    }) as bigint;
 
-      // Get token balance
-      const balance = await wallet.readContract({
-        address: fromTokenAddress as `0x${string}`,
-        abi: erc20Abi,
-        functionName: 'balanceOf',
-        args: [actualFromAddress],
-      }) as bigint;
+    console.log(`Current approval amount: ${allowance} wei`);
 
-      console.log(`ERC20 balance check: ${balance} (${Number(balance) / Math.pow(10, decimals)} tokens)`);
-
-      // Check if balance is sufficient
-      const amountBigInt = BigInt(amount);
-      if (balance < amountBigInt) {
-        throw new Error(`Insufficient ERC20 balance! Need ${Number(amountBigInt) / Math.pow(10, decimals)} tokens, but only have ${Number(balance) / Math.pow(10, decimals)} tokens`);
-      }
-    } catch (error: any) {
-      throw new Error(`Failed to check ERC20 balance: ${error.message}`);
+    // If approval amount is insufficient, throw an error instructing to use approveTokenHandler
+    if (allowance < BigInt(amount)) {
+      throw new Error(
+        `Insufficient token approval. Please use the approveToken tool first with these parameters:\n` +
+        `- tokenAddress: ${fromTokenAddress}\n` +
+        `- spenderAddress: ${txData.to}\n` +
+        `- amount: at least ${amount} wei`
+      );
     }
   }
 
-  try {
-    // Step 1: Get swap data from 1inch API
-    const headers = {
-      accept: "application/json",
-      Authorization: `Bearer ${actualApiKey}`
-    };
-
-    const swapUrl = `https://api.1inch.dev/swap/v6.0/${chainId}/swap`;
-    const swapParams = {
-      src: fromTokenAddress,
-      dst: toTokenAddress,
-      amount,
-      from: actualFromAddress,
-      slippage: slippage.toString(),
-      disableEstimate: true,
-    };
-
-    // Print request information (without full API key)
-    console.log(`1inch API Request to: ${swapUrl}`);
-    console.log(`Headers: { accept: "application/json", Authorization: "Bearer ${actualApiKey.substring(0, 3)}..." }`);
-    console.log(`Params:`, swapParams);
-
+  // Ensure gas parameter is set
+  if (!txData.gas || txData.gas === 0) {
     try {
-      const response = await axios.get(swapUrl, {
-        headers,
-        params: swapParams,
-      });
-
-      const swapData = response.data;
-
-      // Print the complete API response for debugging
-      console.log('Complete 1inch API response:', JSON.stringify(swapData, null, 2));
-
-      // Step 2: Execute the transaction
-      const txData = swapData.tx;
-      console.log('1inch transaction data:', JSON.stringify(txData, null, 2));
-
-      if (swapData.protocols) {
-        console.log('- Protocols used:', JSON.stringify(swapData.protocols, null, 2));
-      }
-
-      // Check wallet balance
-      const balance = await wallet.getBalance({ address: actualFromAddress });
-      console.log(`Wallet balance: ${balance} wei`);
-
-      // If it's an ERC20 token, we may need to check authorization
-      if (fromTokenAddress !== '0xEeeeeEeeeEeEeEeEeEeeEEEeeeeEeeeeeeeEEeE') {
-        console.log('Checking ERC20 token approval...');
-
-        // ERC20 ABI's approval function
-        const erc20Abi = [
-          {
-            "constant": false,
-            "inputs": [
-              { "name": "spender", "type": "address" },
-              { "name": "amount", "type": "uint256" }
-            ],
-            "name": "approve",
-            "outputs": [{ "name": "", "type": "bool" }],
-            "payable": false,
-            "stateMutability": "nonpayable",
-            "type": "function"
-          },
-          {
-            "constant": true,
-            "inputs": [
-              { "name": "owner", "type": "address" },
-              { "name": "spender", "type": "address" }
-            ],
-            "name": "allowance",
-            "outputs": [{ "name": "", "type": "uint256" }],
-            "payable": false,
-            "stateMutability": "view",
-            "type": "function"
-          }
-        ];
-
-        // Check current approval amount
-        const allowance = await wallet.readContract({
-          address: fromTokenAddress as `0x${string}`,
-          abi: erc20Abi,
-          functionName: 'allowance',
-          args: [actualFromAddress, txData.to],
-        }) as bigint;
-
-        console.log(`Current approval amount: ${allowance} wei`);
-
-        // If approval amount is insufficient, we need to approve
-        if (allowance < BigInt(amount)) {
-          console.log('Approving ERC20 token...');
-
-          // Approve a very large value
-          const maxApproval = BigInt('115792089237316195423570985008687907853269984665640564039457584007913129639935'); // 2^256 - 1
-
-          const approveTx = await wallet.writeContract({
-            address: fromTokenAddress as `0x${string}`,
-            abi: erc20Abi,
-            functionName: 'approve',
-            args: [txData.to, maxApproval],
-            account: wallet.account,
-            chain: wallet.chain
-          });
-
-          console.log(`Approval transaction hash: ${approveTx}`);
-
-          // Wait for approval transaction confirmation
-          console.log('Waiting for approval transaction confirmation...');
-          const approveReceipt = await wallet.waitForTransactionReceipt({ hash: approveTx });
-          console.log(`Approval transaction status: ${approveReceipt.status === 'success' ? 'success' : 'failed'}`);
-
-          if (approveReceipt.status !== 'success') {
-            throw new Error('Approval transaction failed');
-          }
-        }
-      }
-
-      // Ensure gas parameter is set
-      if (!txData.gas) {
-        // Estimate gas usage
-        const gasEstimate = await wallet.estimateGas({
-          account: wallet.account,
-          to: txData.to as `0x${string}`,
-          data: txData.data as `0x${string}`,
-          value: BigInt(txData.value || '0'),
-        });
-
-        // Add 20% buffer
-        txData.gas = (gasEstimate * 120n / 100n).toString();
-        console.log(`Estimated gas with 20% buffer: ${txData.gas}`);
-      }
-
-      const tx = {
-        from: actualFromAddress,
+      // Estimate gas usage
+      const gasEstimate = await wallet.estimateGas({
+        account: wallet.account,
         to: txData.to as `0x${string}`,
         data: txData.data as `0x${string}`,
-        value: BigInt(txData.value || 0),
-        gas: BigInt(txData.gas),
-      };
-
-      // Send the transaction
-      console.log('Sending transaction with parameters:', {
-        to: tx.to,
-        value: tx.value.toString(),
-        gas: tx.gas.toString(),
-      });
-      
-      const hash = await wallet.sendTransaction({
-        account: wallet.account,
-        to: tx.to,
-        data: tx.data,
-        value: tx.value,
-        gas: tx.gas,
-        chain: wallet.chain, // Add chain parameter
+        value: BigInt(txData.value || '0'),
       });
 
-      // Return transaction details and estimated result
-      return JSON.stringify({
-        hash,
-        url: constructPolygonScanUrl(wallet.chain ?? polygon, hash),
-        fromToken: swapData.fromToken,
-        toToken: swapData.toToken,
-        fromAmount: swapData.fromAmount,
-        toAmount: swapData.toAmount,
-        estimatedGas: swapData.tx.gas,
-      });
-    } catch (error: any) {
-      if (error.response) {
-        // The request was made and the server responded with a status code
-        // that falls out of the range of 2xx
-        throw new Error(
-          `1inch API error: ${error.response.status} - ${JSON.stringify(
-            error.response.data
-          )}`
-        );
-      } else if (error.request) {
-        // The request was made but no response was received
-        throw new Error(`1inch API request error: ${error.message}`);
-      } else {
-        // Something happened in setting up the request that triggered an Error
-        throw new Error(`1inch swap error: ${error.message}`);
-      }
-    }
-  } catch (error: unknown) {
-    if (typeof error === 'object' && error !== null && 'message' in error) {
-      throw new Error(`1inch swap error: ${(error as Error).message}`);
-    } else {
-      throw new Error(`1inch swap error: ${String(error)}`);
+      // Add 20% buffer
+      txData.gas = (gasEstimate * 120n / 100n).toString();
+      console.log(`Estimated gas with 20% buffer: ${txData.gas}`);
+    } catch (error) {
+      // If estimation fails, use a safe default
+      console.error('Gas estimation failed:', error);
+      txData.gas = '300000'; // Safe default for most swaps
+      console.log(`Using default gas limit: ${txData.gas}`);
     }
   }
+
+  const tx = {
+    from: actualFromAddress,
+    to: txData.to as `0x${string}`,
+    data: txData.data as `0x${string}`,
+    value: BigInt(txData.value || 0),
+    gas: BigInt(txData.gas),
+  };
+
+  // Send the transaction
+  console.log('Sending transaction with parameters:', {
+    to: tx.to,
+    value: tx.value.toString(),
+    gas: tx.gas.toString(),
+  });
+
+  const hash = await wallet.sendTransaction({
+    account: wallet.account,
+    to: tx.to,
+    data: tx.data,
+    value: tx.value,
+    gas: tx.gas,
+    chain: wallet.chain, // Add chain parameter
+  });
+
+  // Return transaction details and estimated result
+  return JSON.stringify({
+    hash,
+    url: constructPolygonScanUrl(wallet.chain ?? polygon, hash),
+    fromToken: swapData.fromToken,
+    toToken: swapData.toToken,
+    fromAmount: swapData.fromAmount,
+    toAmount: swapData.toAmount,
+    estimatedGas: swapData.tx.gas,
+  });
 }
 
 // Check token allowance handler
