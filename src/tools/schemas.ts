@@ -76,3 +76,25 @@ export const InchSwapSchema = z.object({
   apiKey: z.string().optional().describe("Your 1inch API key"),
   chainId: z.number().optional().describe("The chain ID (default: 137 for Polygon)"),
 });
+
+export type ApproveTokenSchema = {
+  tokenAddress: string;
+  spenderAddress: string;
+  amount?: string;
+};
+
+export const approveTokenSchema = z.object({
+  tokenAddress: z.string().describe("The address of the token to approve"),
+  spenderAddress: z.string().describe("The address of the spender to approve"),
+  amount: z.string().optional().describe("The amount to approve (in wei). If not provided, max uint256 will be used."),
+});
+
+export type CheckAllowanceSchema = {
+  tokenAddress: string;
+  spenderAddress: string;
+};
+
+export const checkAllowanceSchema = z.object({
+  tokenAddress: z.string().describe("The address of the token to check allowance for"),
+  spenderAddress: z.string().describe("The address of the spender to check allowance for"),
+});

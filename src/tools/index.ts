@@ -9,6 +9,8 @@ import {
   deployPropertyTokenHandler,
   deployPropertyYieldVaultHandler,
   inchSwapHandler,
+  checkAllowanceHandler,
+  approveTokenHandler,
 } from "./handlers.js";
 
 const callContractTool: Tool = {
@@ -210,6 +212,50 @@ const inchSwapTool: Tool = {
   },
 };
 
+// Check token allowance tool
+const checkAllowanceTool: Tool = {
+  name: "check_allowance",
+  description: "Check the allowance of an ERC20 token for a spender on Polygon PoS",
+  inputSchema: {
+    type: "object",
+    properties: {
+      tokenAddress: {
+        type: "string",
+        description: "The address of the token to check allowance for",
+      },
+      spenderAddress: {
+        type: "string",
+        description: "The address of the spender to check allowance for",
+      },
+    },
+    required: ["tokenAddress", "spenderAddress"],
+  },
+};
+
+// Approve token tool
+const approveTokenTool: Tool = {
+  name: "approve_token",
+  description: "Approve a spender to spend an ERC20 token on Polygon PoS",
+  inputSchema: {
+    type: "object",
+    properties: {
+      tokenAddress: {
+        type: "string",
+        description: "The address of the token to approve",
+      },
+      spenderAddress: {
+        type: "string",
+        description: "The address of the spender to approve",
+      },
+      amount: {
+        type: "string",
+        description: "The amount to approve (in wei). If not provided, max uint256 will be used.",
+      },
+    },
+    required: ["tokenAddress", "spenderAddress"],
+  },
+};
+
 export const polygonMcpTools: Tool[] = [
   callContractTool,
   erc20BalanceTool,
@@ -220,6 +266,8 @@ export const polygonMcpTools: Tool[] = [
   deployPropertyTokenTool,
   deployPropertyYieldVaultTool,
   inchSwapTool,
+  checkAllowanceTool,
+  approveTokenTool,
 ];
 
 // biome-ignore lint/complexity/noBannedTypes: temp
@@ -233,4 +281,6 @@ export const toolToHandler: Record<string, Function> = {
   deploy_property_token: deployPropertyTokenHandler,
   deploy_property_yield_vault: deployPropertyYieldVaultHandler,
   inch_swap: inchSwapHandler,
+  check_allowance: checkAllowanceHandler,
+  approve_token: approveTokenHandler,
 };

@@ -19,6 +19,8 @@ import type {
   Erc20BalanceSchema,
   Erc20TransferSchema,
   InchSwapSchema,
+  checkAllowanceSchema,
+  approveTokenSchema
 } from "./schemas.js";
 import { constructPolygonScanUrl } from "../utils/index.js";
 import { polygon } from "viem/chains";
@@ -292,7 +294,7 @@ export async function inchSwapHandler(
   // 从参数或viemClient中获取API密钥
   const extendedWallet = wallet as any;
   const actualApiKey = apiKey || extendedWallet.oneInchApiKey;
-  
+
   // Check if API key is provided
   if (!actualApiKey) {
     throw new Error("API key is required for 1inch swap");
@@ -335,11 +337,11 @@ export async function inchSwapHandler(
       // 检查钱包余额
       const balance = await wallet.getBalance({ address: actualFromAddress });
       console.log(`钱包余额: ${balance} wei`);
-      
+
       // 如果是ERC20代币，可能需要检查授权
       if (fromTokenAddress !== '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE') {
         console.log('检查ERC20代币授权...');
-        
+
         // ERC20 ABI的授权函数
         const erc20Abi = [
           {
@@ -381,10 +383,10 @@ export async function inchSwapHandler(
         // 如果授权额度不足，需要授权
         if (allowance < BigInt(amount)) {
           console.log('授权ERC20代币...');
-          
+
           // 授权一个非常大的数值
           const maxApproval = BigInt('115792089237316195423570985008687907853269984665640564039457584007913129639935'); // 2^256 - 1
-          
+
           const approveTx = await wallet.writeContract({
             address: fromTokenAddress as `0x${string}`,
             abi: erc20Abi,
@@ -393,14 +395,14 @@ export async function inchSwapHandler(
             account: wallet.account,
             chain: wallet.chain
           });
-          
+
           console.log(`授权交易哈希: ${approveTx}`);
-          
+
           // 等待授权交易确认
           console.log('等待授权交易确认...');
           const approveReceipt = await wallet.waitForTransactionReceipt({ hash: approveTx });
           console.log(`授权交易状态: ${approveReceipt.status === 'success' ? '成功' : '失败'}`);
-          
+
           if (approveReceipt.status !== 'success') {
             throw new Error('授权交易失败');
           }
@@ -472,5 +474,87 @@ export async function inchSwapHandler(
     } else {
       throw new Error(`1inch swap error: ${String(error)}`);
     }
+  }
+}
+
+// Check token allowance handler
+export async function checkAllowanceHandler(
+  wallet: WalletClient & PublicActions,
+  args: z.infer<typeof checkAllowanceSchema>
+): Promise<string> {
+  if (!wallet.account?.address) {
+    throw new Error("No account address available");
+  }
+
+  const { tokenAddress, spenderAddress } = args;
+
+  // Validate addresses
+  if (!isAddress(tokenAddress)) {
+    throw new Error(`Invalid tokenAddress: ${tokenAddress}`);
+  }
+  if (!isAddress(spenderAddress)) {
+    throw new Error(`Invalid spenderAddress: ${spenderAddress}`);
+  }
+
+  try {
+    // 检查当前授权额度
+    const allowance = await wallet.readContract({
+      address: tokenAddress as `0x${string}`,
+      abi: erc20Abi,
+      functionName: 'allowance',
+      args: [wallet.account.address, spenderAddress],
+    }) as bigint;
+
+    return allowance.toString();
+  } catch (error) {
+    console.error('检查授权额度失败:', error);
+    throw new Error(`检查授权额度失败: ${(error as Error).message}`);
+  }
+}
+
+// Approve token handler
+export async function approveTokenHandler(
+  wallet: WalletClient & PublicActions,
+  args: z.infer<typeof approveTokenSchema>
+): Promise<string> {
+  if (!wallet.account?.address) {
+    throw new Error("No account address available");
+  }
+
+  const { tokenAddress, spenderAddress, amount } = args;
+
+  // Validate addresses
+  if (!isAddress(tokenAddress)) {
+    throw new Error(`Invalid tokenAddress: ${tokenAddress}`);
+  }
+  if (!isAddress(spenderAddress)) {
+    throw new Error(`Invalid spenderAddress: ${spenderAddress}`);
+  }
+
+  try {
+    // 默认授权最大值
+    const maxApproval = BigInt('115792089237316195423570985008687907853269984665640564039457584007913129639935'); // 2^256 - 1
+    const approvalAmount = amount ? BigInt(amount) : maxApproval;
+
+    // 执行授权交易
+    const hash = await wallet.writeContract({
+      address: tokenAddress as `0x${string}`,
+      abi: erc20Abi,
+      functionName: 'approve',
+      args: [spenderAddress, approvalAmount],
+      account: wallet.account,
+      chain: wallet.chain
+    });
+
+    return JSON.stringify({
+      hash,
+      url: constructPolygonScanUrl(wallet.chain ?? polygon, hash),
+      tokenAddress,
+      spenderAddress,
+      amount: approvalAmount.toString(),
+    });
+  } catch (error) {
+    console.error('授权代币失败:', error);
+    throw new Error(`授权代币失败: ${(error as Error).message}`);
   }
 }
